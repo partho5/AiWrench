@@ -1,0 +1,148 @@
+# ── Secrets & credentials ──────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+secrets/
+credentials/
+
+# ── Python ─────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+MANIFEST
+
+# ── Virtual environments ────────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+# ── Dependency managers ─────────────────────────────────────────────────────────
+pip-log.txt
+pip-delete-this-directory.txt
+Pipfile.lock
+poetry.lock
+
+# ── Testing & coverage ─────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+nosetests.xml
+test-results/
+.tox/
+.nox/
+
+# ── Logs ───────────────────────────────────────────────────────────────────────
+*.log
+*.log.*
+*.log.gz
+*.log.zip
+logs/
+log/
+*.jsonl
+*.ndjson
+
+# ── ChromaDB (local vector store) ──────────────────────────────────────────────
+chroma/
+chroma_db/
+.chroma/
+*.chroma
+
+# ── Database / storage ─────────────────────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.rdb
+dump.rdb
+
+# ── OS artifacts ───────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ── IDEs — JetBrains / IntelliJ ────────────────────────────────────────────────
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea/shelf/
+.idea/workspace.xml
+.idea/queries/
+.idea/dataSources/
+.idea/dataSources.local.xml
+.idea/httpRequests/
+
+# ── IDEs — VSCode ──────────────────────────────────────────────────────────────
+.vscode/
+*.code-workspace
+
+# ── IDEs — Vim / Emacs / misc ──────────────────────────────────────────────────
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+*.tmp
+\#*\#
+.\#*
+
+# ── Type checkers ──────────────────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+.pyre/
+
+# ── Linters ────────────────────────────────────────────────────────────────────
+.ruff_cache/
+
+# ── Jupyter ────────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Build / distribution artifacts ─────────────────────────────────────────────
+*.whl
+*.tar.gz
+*.zip
+*.deb
+*.rpm
+
+# ── Railway / deployment ───────────────────────────────────────────────────────
+.railway/
+.vercel/
+
+# ── Docker ─────────────────────────────────────────────────────────────────────
+.dockerignore.local
+
+# ── Profiling ──────────────────────────────────────────────────────────────────
+*.prof
+*.pstats

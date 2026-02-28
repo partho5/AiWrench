@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARWrench API Tester</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        if (typeof pdfjsLib !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+    </script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+
+    <header class="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-900 sticky top-0 z-10">
+        <h1 class="text-xl font-bold text-orange-500">ARWrench AI Debugger</h1>
+        <div class="flex gap-4 items-center">
+            <select id="skillLevel" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm">
+                <option value="1">Level 1 (Novice)</option>
+                <option value="3">Level 3 (Basic DIY)</option>
+                <option value="5" selected>Level 5 (Standard)</option>
+                <option value="8">Level 8 (Pro)</option>
+            </select>
+            <button onclick="resetChat()" class="text-xs bg-red-900/30 text-red-400 px-3 py-1 rounded border border-red-800">Reset Chat</button>
+        </div>
+    </header>
+
+    <main id="chatWindow" class="flex-1 overflow-y-auto p-4 space-y-4 max-w-3xl mx-auto w-full">
+        <div class="bg-blue-900/20 border border-blue-800 p-4 rounded-lg text-sm text-blue-200">
+            Start by describing a problem or uploading a photo.
+        </div>
+
+
+    </main>
+
+    <footer class="p-4 bg-gray-850 border-t border-gray-800">
+        <div class="max-w-3xl mx-auto space-y-3">
+            <div id="filePreview" class="hidden flex items-center gap-2 p-2 bg-gray-800 rounded border border-gray-700">
+                <span id="fileName" class="text-xs truncate"></span>
+                <button onclick="clearFile()" class="text-red-500 font-bold ml-auto">×</button>
+            </div>
+            
+            <div class="flex gap-2">
+                <label class="cursor-pointer bg-gray-700 hover:bg-gray-600 p-3 rounded-lg transition">
+                    <input type="file" id="fileInput" class="hidden" onchange="handleFileSelect(event)">
+                    📎
+                </label>
+                <input type="text" id="userInput" 
+                    class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 focus:outline-none focus:border-orange-500" 
+                    placeholder="Describe the mechanical issue...">
+                <button onclick="handleSend()" id="sendBtn" class="bg-orange-600 hover:bg-orange-700 px-6 py-2 rounded-lg font-bold transition">Send</button>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Cloudinary config — public values for unsigned upload
+        const CLOUDINARY_CLOUD_NAME = "dfgox7xc8";
+        const CLOUDINARY_UPLOAD_PRESET = "hq-glass-orders-unsigned";
+        const API_BASE = "http://localhost:8000";
+
+        let messages = [];
+        let currentFile = null;
+        let assetContext = null;
+
+        // 1. UI Helpers
+        function addMessage(role, content, isSystem = false) {
+            const win = document.getElementById('chatWindow');
+            const div = document.createElement('div');
+            div.className = `p-3 rounded-lg max-w-[85%] ${role === 'user' ? 'bg-orange-900/20 border border-orange-800 self-end ml-auto' : 'bg-gray-800 border border-gray-700'}`;
+            div.innerHTML = `<div class="text-[10px] uppercase opacity-50 mb-1">${role}</div><div class="whitespace-pre-wrap">${content}</div>`;
+            win.appendChild(div);
+            win.scrollTop = win.scrollHeight;
+        }
+
+        function handleFileSelect(e) {
+            currentFile = e.target.files[0];
+            if (currentFile) {
+                document.getElementById('filePreview').classList.remove('hidden');
+                document.getElementById('fileName').innerText = currentFile.name;
+            }
+        }
+
+        function clearFile() {
+            currentFile = null;
+            document.getElementById('fileInput').value = '';
+            document.getElementById('filePreview').classList.add('hidden');
+        }
+
+        // Helper: detect if file is an image
+        function isImageFile(file) {
+            return file.type.startsWith('image/');
+        }
+
+        // Extract text from PDF using PDF.js (first 4 pages max, 4000 chars cap)
+        async function extractPdfText(file) {
+            if (typeof pdfjsLib === 'undefined') throw new Error('PDF.js not loaded');
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const maxPages = Math.min(pdf.numPages, 4);
+            let text = '';
+            for (let i = 1; i <= maxPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                text += content.items.map(item => item.str).join(' ') + '\n';
+                if (text.length > 4000) break;
+            }
+            return text.trim().slice(0, 4000);
+        }
+
+        // Upload file to Cloudinary (unsigned)
+        async function uploadFileToCloudinary(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+
+            const res = await fetch(
+                `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`,
+                { method: 'POST', body: formData }
+            );
+            if (!res.ok) throw new Error(`Cloudinary upload failed: ${res.status}`);
+            const data = await res.json();
+            return data.secure_url;
+        }
+
+        // 2. API Logic
+        async function handleSend() {
+            const input = document.getElementById('userInput');
+            const text = input.value.trim();
+            if (!text && !currentFile) return;
+
+            const btn = document.getElementById('sendBtn');
+            btn.disabled = true;
+            btn.innerText = "Thinking...";
+
+            try {
+                let imageUrl = null;
+                let fileInfo = "";
+                let apiText = text; // may be augmented with PDF content
+
+                // Upload file if present
+                if (currentFile) {
+                    btn.innerText = "Uploading file...";
+                    const fileUrl = await uploadFileToCloudinary(currentFile);
+                    if (isImageFile(currentFile)) {
+                        imageUrl = fileUrl;
+                        fileInfo = `[Image: ${currentFile.name}]`;
+                        // Tell the AI a photo was sent — so classify and enrich both know
+                        apiText = `[User sent a photo: ${currentFile.name}]` + (text ? `\n${text}` : '');
+                    } else if (currentFile.type === 'application/pdf') {
+                        btn.innerText = "Reading PDF...";
+                        const pdfText = await extractPdfText(currentFile);
+                        fileInfo = `[PDF: ${currentFile.name}]`;
+                        // Label + content so AI knows it's a document, not typed text
+                        apiText = `[User uploaded PDF: ${currentFile.name}]\n${pdfText}` + (text ? `\n\nUser note: ${text}` : '');
+                    } else {
+                        fileInfo = `[File: ${currentFile.name}]`;
+                    }
+                }
+
+                // Step A: Classification (If first message)
+                if (!assetContext) {
+                    addMessage('user', text ? (fileInfo ? `${fileInfo}\n${text}` : text) : fileInfo);
+                    await classifyInitial(apiText, imageUrl);
+                } else {
+                    // Step B: Normal Enrich (with optional image)
+                    if (fileInfo) addMessage('user', fileInfo);
+                    if (text) addMessage('user', text);
+                    if (apiText) messages.push({ role: "user", content: apiText });
+                    await runEnrich(imageUrl);
+                }
+            } catch (err) {
+                addMessage('assistant', "⚠️ Error: " + err.message);
+            } finally {
+                input.value = '';
+                clearFile();
+                btn.disabled = false;
+                btn.innerText = "Send";
+            }
+        }
+
+        async function classifyInitial(text, imageUrl) {
+            const res = await fetch(`${API_BASE}/classify`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    textDescription: text,
+                    assetId: "test_asset_123"
+                })
+            });
+            const data = await res.json();
+            const specs = data.assetSpecs || {};
+            const identified = specs.type && specs.type !== "unknown" && specs.make && specs.make !== "unknown";
+
+            if (identified) {
+                assetContext = specs;
+            }
+            if (text) messages.push({ role: "user", content: text });
+            await runEnrich(imageUrl);
+        }
+
+        async function runEnrich(imageUrl = null) {
+            const payload = {
+                threadId: "test_thread",
+                messages: messages,
+                assetContext: assetContext || {},
+                skillLevel: parseInt(document.getElementById('skillLevel').value)
+            };
+            if (imageUrl) {
+                payload.imageUrl = imageUrl;
+            }
+
+            const responseDiv = document.createElement('div');
+            responseDiv.className = 'p-3 rounded-lg max-w-[85%] bg-gray-800 border border-gray-700';
+            responseDiv.innerHTML = `
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-[10px] uppercase opacity-50">assistant</span>
+                    <span class="conf-badge hidden text-[10px] px-1.5 py-0.5 rounded-full font-mono"></span>
+                </div>
+                <div class="stream-content whitespace-pre-wrap"></div>
+            `;
+            document.getElementById('chatWindow').appendChild(responseDiv);
+            document.getElementById('chatWindow').scrollTop = document.getElementById('chatWindow').scrollHeight;
+
+            let fullContent = '';
+            const contentDiv = responseDiv.querySelector('.stream-content');
+            const confBadge = responseDiv.querySelector('.conf-badge');
+            let eventCount = 0;
+            let firstChunkAt = null;
+            const t0 = performance.now();
+
+            try {
+                const res = await fetch(`${API_BASE}/enrich/stream`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const jsonStr = line.slice(6).trim();
+                            if (jsonStr) {
+                                try {
+                                    const event = JSON.parse(jsonStr);
+                                    eventCount++;
+
+                                    if (event.chunk) {
+                                        if (!firstChunkAt) {
+                                            firstChunkAt = performance.now();
+                                        }
+                                        fullContent += event.chunk;
+                                        contentDiv.textContent = fullContent;
+                                        document.getElementById('chatWindow').scrollTop = document.getElementById('chatWindow').scrollHeight;
+
+                                    } else if (event.status === 'complete') {
+                                        contentDiv.textContent = fullContent;
+
+                                        // Confidence badge
+                                        const conf = event.confidence ?? 0;
+                                        confBadge.textContent = `${conf}%`;
+                                        confBadge.classList.remove('hidden');
+                                        if (conf >= 70) {
+                                            confBadge.className = 'text-[10px] px-1.5 py-0.5 rounded-full font-mono bg-green-900/40 text-green-400';
+                                        } else if (conf >= 40) {
+                                            confBadge.className = 'text-[10px] px-1.5 py-0.5 rounded-full font-mono bg-yellow-900/40 text-yellow-400';
+                                        } else {
+                                            confBadge.className = 'text-[10px] px-1.5 py-0.5 rounded-full font-mono bg-gray-700 text-gray-500';
+                                        }
+
+                                        // Safety flag
+                                        if (event.safety_flag) {
+                                            const safetyDiv = document.createElement('div');
+                                            safetyDiv.className = 'mt-2 text-xs text-yellow-300 bg-yellow-900/30 border border-yellow-800 rounded px-2 py-1';
+                                            safetyDiv.textContent = '⚠️ Safety concern — do not attempt without proper guidance.';
+                                            responseDiv.appendChild(safetyDiv);
+                                        }
+
+                                        // Abstain
+                                        if (event.abstain) {
+                                            responseDiv.classList.replace('border-gray-700', 'border-orange-800');
+                                            const abstainDiv = document.createElement('div');
+                                            abstainDiv.className = 'mt-2 text-xs text-orange-400 opacity-80';
+                                            abstainDiv.textContent = 'Unable to diagnose — please consult a qualified technician.';
+                                            responseDiv.appendChild(abstainDiv);
+                                        } else {
+                                            messages.push({ role: "assistant", content: fullContent });
+                                        }
+
+                                    } else if (event.error) {
+                                        contentDiv.textContent = `❌ Error: ${event.error}`;
+                                        messages.push({ role: "assistant", content: `Error: ${event.error}` });
+                                    }
+                                } catch (e) {
+                                    console.error('Failed to parse event:', jsonStr, e);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                contentDiv.textContent = `❌ Error: ${err.message}`;
+                messages.push({ role: "assistant", content: `Error: ${err.message}` });
+            }
+        }
+
+        function resetChat() {
+            messages = [];
+            assetContext = null;
+            document.getElementById('chatWindow').innerHTML = '';
+            addMessage('assistant', "Chat reset. Ready for a new diagnosis.");
+        }
+    </script>
+</body>
+</html>
