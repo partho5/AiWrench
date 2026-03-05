@@ -59,7 +59,8 @@
         // Cloudinary config — public values for unsigned upload
         const CLOUDINARY_CLOUD_NAME = "dfgox7xc8";
         const CLOUDINARY_UPLOAD_PRESET = "hq-glass-orders-unsigned";
-        const API_BASE = "http://localhost:8000";
+        let API_BASE = "http://localhost:8000";
+        API_BASE = "https://aiwrench-production.up.railway.app";
 
         let messages = [];
         let currentFile = null;
@@ -289,6 +290,30 @@
                                             safetyDiv.className = 'mt-2 text-xs text-yellow-300 bg-yellow-900/30 border border-yellow-800 rounded px-2 py-1';
                                             safetyDiv.textContent = '⚠️ Safety concern — do not attempt without proper guidance.';
                                             responseDiv.appendChild(safetyDiv);
+                                        }
+
+                                        // Affiliate links
+                                        const links = event.affiliate_links;
+                                        if (Array.isArray(links) && links.length > 0) {
+                                            const linksWrap = document.createElement('div');
+                                            linksWrap.className = 'mt-3 flex flex-wrap gap-2';
+                                            links.forEach(item => {
+                                                let category = '', name = item.label || '';
+                                                try {
+                                                    const d = JSON.parse(item.data || '{}');
+                                                    category = d.category || '';
+                                                    name = d.name || name;
+                                                } catch (_) {}
+                                                const chip = document.createElement('div');
+                                                chip.className = 'flex flex-col gap-0.5 bg-orange-950/40 border border-orange-700/60 rounded-lg px-3 py-2 text-xs max-w-[180px]';
+                                                chip.innerHTML = `
+                                                    <span class="text-orange-400 font-semibold truncate">${item.label || name}</span>
+                                                    ${category ? `<span class="text-gray-500 uppercase tracking-wide text-[10px]">${category}</span>` : ''}
+                                                    <span class="text-gray-400 truncate">${name}</span>
+                                                `;
+                                                linksWrap.appendChild(chip);
+                                            });
+                                            responseDiv.appendChild(linksWrap);
                                         }
 
                                         // Abstain

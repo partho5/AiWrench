@@ -301,7 +301,7 @@ PART 1: Your full diagnostic answer as plain readable text.
 
 ---META---
 PART 2: ONLY this JSON (one line, no extra formatting):
-{{"symptom_match":<0-100>,"history_alignment":<0-100>,"specificity":<0-100>,"safety_flag":<true/false>,"safety_explanation":"<text>","abstain":<true/false>}}
+{{"symptom_match":<0-100>,"history_alignment":<0-100>,"specificity":<0-100>,"safety_flag":<true/false>,"safety_explanation":"<text>","abstain":<true/false>,"affiliate_links":[...]}}
 
 METADATA GUIDE:
 - symptom_match (0-100): Alignment with known failure patterns
@@ -310,6 +310,8 @@ METADATA GUIDE:
 - safety_flag: true for electrical/gas/structural/personal safety hazards
 - safety_explanation: Brief reason if safety_flag is true, empty string if false
 - abstain: true only if issue is outside technical scope or too dangerous to diagnose
+- affiliate_links: array of purchasable items directly relevant to THIS diagnostic step. Include only when a specific part, fluid, consumable, or tool purchase would help confirm or resolve the issue. Use [] when nothing specific is needed right now. Each item format: {{"type":"affiliate_link","label":"<concise buy label>","data":"{{\\"category\\":\\"<broad category>\\",\\"name\\":\\"<specific product>\\"}}"}}.
+  Category examples: Oil, Filter, Battery, Brake Pad, Spark Plug, Sensor, Fuse, Belt, Fluid, Tool, Diagnostic Tool, Sealant, Cleaner — use whatever fits the product.
 
 REMEMBER: Every response MUST have a blank line, then ---META---, then a blank line, then JSON."""
 
@@ -372,7 +374,11 @@ IMPORTANT: Respond ONLY in this exact JSON format — no extra text, no markdown
   "specificity": <integer 0-100>,
   "safety_flag": <true or false>,
   "safety_explanation": "Brief explanation if safety_flag is true, otherwise empty string",
-  "abstain": <true or false>
+  "abstain": <true or false>,
+  "affiliate_links": [
+    {{"type": "affiliate_link", "label": "<concise buy label>", "data": "{{\\"category\\":\\"<broad category>\\",\\"name\\":\\"<specific product>\\"}}"}},
+    ...
+  ]
 }}
 
 Guidelines:
@@ -380,7 +386,8 @@ Guidelines:
 - history_alignment: how well the service history supports or contradicts your diagnosis
 - specificity: how precise and actionable your diagnosis is (generic guesses score low)
 - safety_flag: set true for anything involving electrical hazards, gas, structural integrity, or personal safety risk
-- abstain: set true only if the issue is completely outside technical troubleshooting or would be dangerous to guess"""
+- abstain: set true only if the issue is completely outside technical troubleshooting or would be dangerous to guess
+- affiliate_links: list purchasable items (parts, fluids, consumables, tools) directly relevant to resolving or confirming the diagnosis. Use an empty array [] when nothing specific needs to be purchased. Category examples: Oil, Filter, Battery, Brake Pad, Spark Plug, Sensor, Fuse, Belt, Fluid, Tool, Diagnostic Tool, Sealant, Cleaner."""
 
 
 def _clamp(value: int, lo: int = 0, hi: int = 100) -> int:
@@ -451,6 +458,7 @@ async def enrich(req: EnrichRequest):
             confidence_reasons=reasons,
             abstain=bool(parsed.get("abstain", False)),
             safety_flag=bool(parsed.get("safety_flag", False)),
+            affiliate_links=parsed.get("affiliate_links", []),
         )
 
     except httpx.HTTPStatusError as exc:
@@ -588,7 +596,7 @@ async def enrich_stream(req: EnrichRequest):
 
             # ── Emit typed completion event ──────────────────────────────────────
             confidence, reasons = compute_confidence(metadata)
-            yield f"data: {json.dumps({'status': 'complete', 'confidence': confidence, 'abstain': bool(metadata.get('abstain', False)), 'safety_flag': bool(metadata.get('safety_flag', False))})}\n\n"
+            yield f"data: {json.dumps({'status': 'complete', 'confidence': confidence, 'abstain': bool(metadata.get('abstain', False)), 'safety_flag': bool(metadata.get('safety_flag', False)), 'affiliate_links': metadata.get('affiliate_links', [])})}\n\n"
             log_step("enrich_stream_completed", thread_id=req.threadId, confidence=confidence)
 
         except httpx.HTTPStatusError as exc:

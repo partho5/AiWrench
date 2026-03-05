@@ -35,6 +35,7 @@ class EnrichResponse(BaseModel):
     abstain: bool
     safety_flag: bool
     role: str = "assistant"
+    affiliate_links: list[dict] = Field(default_factory=list)
 
 
 class VisionRequest(BaseModel):

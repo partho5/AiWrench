@@ -190,7 +190,14 @@ Append the AI's previous answer and the new user message, then send the full arr
   ],
   "abstain": false,
   "safety_flag": false,
-  "role": "assistant"
+  "role": "assistant",
+  "affiliate_links": [
+    {
+      "type": "affiliate_link",
+      "label": "Buy AC Compressor Clutch",
+      "data": "{\"category\":\"AC Part\",\"name\":\"AC compressor clutch\"}"
+    }
+  ]
 }
 ```
 
@@ -202,6 +209,7 @@ Append the AI's previous answer and the new user message, then send the full arr
 | `abstain` | boolean | If `true`, the AI cannot reliably help. Show: *"I'm not confident enough to answer. Please consult a qualified technician."* |
 | `safety_flag` | boolean | If `true`, show a safety warning banner above the answer |
 | `role` | string | Always `"assistant"`. Use as `role` when appending to `messages` |
+| `affiliate_links` | object[] | Parts, fluids, or tools the AI recommends purchasing for this step. Empty array `[]` when nothing specific is needed. See [Affiliate Links](#affiliate-links) |
 
 ### Streaming variant — POST /enrich/stream
 
@@ -230,7 +238,14 @@ Append each `chunk` string to the displayed message as it arrives. This is all y
   "status": "complete",
   "confidence": 72,
   "safety_flag": false,
-  "abstain": false
+  "abstain": false,
+  "affiliate_links": [
+    {
+      "type": "affiliate_link",
+      "label": "Buy AC Compressor Clutch",
+      "data": "{\"category\":\"AC Part\",\"name\":\"AC compressor clutch\"}"
+    }
+  ]
 }
 ```
 
@@ -241,6 +256,7 @@ Signals the stream is finished. The full assembled text is now the complete AI m
 | `confidence` | integer 0–100 | How certain the AI is about its current diagnosis. This is expected to be low (30–50) early in the conversation while the AI is still asking questions. It rises as symptoms are confirmed. |
 | `safety_flag` | boolean | `true` means this response involves something potentially dangerous (electrical, gas, structural). The AI will have mentioned the risk in its text — but you may want to reinforce it visually. |
 | `abstain` | boolean | `true` means the AI declined to answer — either the question is outside technical troubleshooting, or guessing would be dangerous. If `abstain` is `true`, the streamed text will explain why. |
+| `affiliate_links` | object[] | Parts, fluids, or tools relevant to the current step. Empty array `[]` when nothing specific is needed. See [Affiliate Links](#affiliate-links) |
 
 **3 — Error event** (only on failure)
 
@@ -282,6 +298,13 @@ onComplete { event in
     // e.g. a subtle indicator that builds over the conversation.
     // It is intentionally low early — do not alarm the user at turn 1.
     updateConfidenceIndicator(event.confidence)
+
+    // Affiliate links — show product cards below the message bubble
+    // when the AI recommends something purchasable.
+    // Pass each item to your affiliate resolution backend.
+    for link in event.affiliate_links {
+        showAffiliateCard(link)        // see Affiliate Links section below
+    }
 }
 
 onError { error in
@@ -613,6 +636,65 @@ User attaches a file
 
 ---
 
+## Affiliate Links
+
+The AI includes `affiliate_links` in every `/enrich` and `/enrich/stream` response when a specific purchase would help confirm or resolve the diagnosis — a replacement part, a fluid, a consumable, a tool. The array is empty `[]` when nothing needs to be bought.
+
+### Item structure
+
+```json
+{
+  "type": "affiliate_link",
+  "label": "Buy AC Compressor Clutch",
+  "data": "{\"category\":\"AC Part\",\"name\":\"AC compressor clutch\"}"
+}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `type` | string | Always `"affiliate_link"` |
+| `label` | string | Short buy label — use as the card CTA text |
+| `data` | string | **JSON-encoded string** — parse it to get `category` and `name` |
+
+> `data` is a JSON string, not an object. You must `JSON.parse(item.data)` before reading `category` or `name`.
+
+### Parsed data fields
+
+```json
+{
+  "category": "AC Part",
+  "name": "AC compressor clutch"
+}
+```
+
+| Field | Notes |
+|-------|-------|
+| `category` | Broad product category. Pass to your affiliate table lookup |
+| `name` | Specific product name. Use for display and for matching affiliate products |
+
+### How to handle
+
+1. On `complete` event (streaming) or in the response body (non-streaming), read `affiliate_links`
+2. If the array is non-empty, render product cards below the message bubble
+3. For each item, parse `data`, then pass `category` + `name` to your affiliate resolution backend (Convex `affiliateProducts` table)
+4. Your backend resolves a tracked affiliate URL and returns product name, price, image
+5. Show the resolved product card with a "View Product" button
+
+```swift
+// Pseudocode
+for link in event.affiliate_links {
+    let data = try JSONDecoder().decode(AffiliateData.self, from: link.data)
+    let product = await resolveAffiliate(category: data.category, name: data.name)
+    if let product {
+        renderProductCard(label: link.label, product: product)
+    }
+}
+```
+
+**Do not** append affiliate links to `messages[]` — they are UI metadata only, not conversation turns.
+
+---
+
 ## skillLevel Reference
 
 | Value | Who | AI behaviour |
@@ -624,12 +706,3 @@ User attaches a file
 | 9–10 | Professional technician | OEM procedures, TSBs, fault tree analysis |
 
 ---
-
-## Files to Ignore
-
-| File | Reason |
-|------|--------|
-| `README.md` | Server setup for Python engineers |
-| `DEVELOPMENT_GUIDE.md` | Internal AI engineer guide |
-| `API_INTEGRATION_MAP.md` | Convex integration reference — not needed for mobile |
-| `PROJECT_CONTEXT_AI-mechanic.md` | Project brief — internal only |
