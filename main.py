@@ -1,8 +1,11 @@
 """ARWrench AI Enrichment API — FastAPI entry point."""
 from __future__ import annotations
 
+import asyncio
+import os
 import time
 import uuid
+from collections import defaultdict
 from typing import Callable
 
 from dotenv import load_dotenv
@@ -98,6 +101,75 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(RequestLoggingMiddleware)
+
+
+# Auth Middleware — shared secret between Convex and this API
+
+_UNPROTECTED_PATHS = {"/health"}
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """Require X-API-Token header on all routes except /health."""
+
+    async def dispatch(self, request: Request, call_next: Callable) -> JSONResponse:
+        if request.url.path in _UNPROTECTED_PATHS:
+            return await call_next(request)
+
+        expected = os.getenv("API_SECRET_TOKEN", "")
+        if not expected:
+            # Token not configured — allow through but warn (dev environment)
+            logger.warning("API_SECRET_TOKEN not set — auth check skipped")
+            return await call_next(request)
+
+        token = request.headers.get("X-API-Token", "")
+        if token != expected:
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+        return await call_next(request)
+
+
+app.add_middleware(AuthMiddleware)
+
+
+# IP Rate Limit Middleware — abuse prevention at the server boundary
+
+class IPRateLimitMiddleware(BaseHTTPMiddleware):
+    """Sliding-window IP rate limiter. Limits are a server-level abuse guard only.
+    Per-user quota enforcement is handled by the Convex/app layer before requests reach here."""
+
+    def __init__(self, app, max_requests: int = 200, window_seconds: int = 60):
+        super().__init__(app)
+        self._max = max_requests
+        self._window = window_seconds
+        self._hits: dict[str, list[float]] = defaultdict(list)
+        self._lock = asyncio.Lock()
+
+    async def dispatch(self, request: Request, call_next: Callable) -> JSONResponse:
+        if request.url.path in _UNPROTECTED_PATHS:
+            return await call_next(request)
+
+        ip = request.client.host if request.client else "unknown"
+        now = time.time()
+        cutoff = now - self._window
+
+        async with self._lock:
+            self._hits[ip] = [t for t in self._hits[ip] if t > cutoff]
+            if len(self._hits[ip]) >= self._max:
+                oldest = min(self._hits[ip])
+                retry_after = max(1, int(oldest + self._window - now) + 1)
+                logger.warning(f"Rate limit exceeded for IP {ip}")
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": f"Too many requests. Retry after {retry_after}s."},
+                    headers={"Retry-After": str(retry_after)},
+                )
+            self._hits[ip].append(now)
+
+        return await call_next(request)
+
+
+_rate_limit_rpm = int(os.getenv("RATE_LIMIT_RPM", "200"))
+app.add_middleware(IPRateLimitMiddleware, max_requests=_rate_limit_rpm, window_seconds=60)
 
 
 # Global error handler

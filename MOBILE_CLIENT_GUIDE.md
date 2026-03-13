@@ -1,4 +1,4 @@
-# ARWrench API — Mobile Client Guide
+# ARWrench API — Mobile Client Guide v1.0
 
 The only document a mobile/Convex developer needs.
 
@@ -12,6 +12,75 @@ The only document a mobile/Convex developer needs.
 - The app renders what comes back and forwards user responses — nothing more
 - **Never build app-side logic to decide what question to ask, when to switch phases, or what the user should do next** — that is the AI's job
 - The `messages[]` array is the single source of truth for the entire session. It grows with every turn and is passed in full on every `/enrich` call
+
+---
+
+## Authentication & Rate Limiting
+
+### Authentication
+
+All requests (except `GET /health`) must include a shared secret in the `X-API-Token` header. Convex holds this token and sends it on every outbound call to this API.
+
+**Every request must look like this:**
+
+```http
+POST /enrich HTTP/1.1
+Host: your-api-host.com
+Content-Type: application/json
+X-API-Token: your-secret-token-here
+
+{
+  "threadId": "thread_camry_ac_001",
+  "messages": [...],
+  "assetContext": { ... },
+  "skillLevel": 3
+}
+```
+
+Same header applies to all endpoints:
+
+```http
+POST /classify
+X-API-Token: your-secret-token-here
+{ ... }
+
+POST /vision
+X-API-Token: your-secret-token-here
+{ ... }
+
+POST /classify/refine
+X-API-Token: your-secret-token-here
+{ ... }
+```
+
+The token is set via the `API_SECRET_TOKEN` environment variable on the server. Mobile clients never call this API directly — all traffic flows through Convex, which owns end-user authentication and injects the token.
+
+**Missing or wrong token → `401 Unauthorized`:**
+```json
+{"detail": "Unauthorized"}
+```
+
+### Rate Limiting — two layers, two owners
+
+| Layer | Who enforces | What it limits | Where |
+|-------|-------------|---------------|-------|
+| **Per-user quotas** | Mobile app + Convex | Daily caps per user/tier (voice, video, AR, etc.) | App layer — never reaches this API |
+| **Per-IP abuse guard** | This API | Requests per minute from a single IP | FastAPI middleware |
+
+**Per-user quotas are enforced before the request ever hits this server.** This keeps user-level logic in the app layer and saves server resources. The app is the authority on what a given user is allowed to do.
+
+**IP-level limiting** is a safety net only — it protects against runaway clients or misconfigured callers, not normal usage. Default: 200 requests/minute per IP (configurable via `RATE_LIMIT_RPM` env var).
+
+When the IP limit is hit, the response includes a `Retry-After` header with the exact seconds to wait:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 14
+
+{"detail": "Too many requests. Retry after 14s."}
+```
+
+Convex should read `Retry-After` and reschedule the call — not retry immediately.
 
 ---
 
@@ -57,6 +126,119 @@ The only document a mobile/Convex developer needs.
 ```
 
 The AI decides when it has enough. The app just keeps the loop going.
+
+---
+
+## End-to-End Example — "AC Humming" Session
+
+A complete walkthrough of a real diagnostic session from first tap to affiliate card.
+
+### Step 1 — User opens app, describes problem
+
+User types: *"My car AC stopped working. Makes a loud humming when I turn it on."*
+
+```
+POST /classify
+{
+  "textDescription": "My car AC stopped working. Makes a loud humming when I turn it on.",
+  "assetId": "asset_camry_001",
+  "visionResult": null
+}
+```
+
+Response: AI identifies a 2020 Toyota Camry, `confidence: 55`. App saves `assetSpecs` to DB.
+
+---
+
+### Step 2 — Conversation begins (Turn 1)
+
+App calls `/enrich` with the user's message as the first turn:
+
+```
+POST /enrich/stream
+messages: [{ role: "user", content: "My car AC stopped working..." }]
+assetContext: { type: "vehicle", make: "Toyota", model: "Camry", year: 2020 }
+skillLevel: 3
+```
+
+AI streams back: *"How long has this been happening, and does the humming occur only when the AC is on, or also when using just the fan?"*
+`confidence: 28` — early, still gathering symptoms.
+
+App appends `{ role: "assistant", content: "..." }` to messages.
+
+---
+
+### Step 3 — User answers (Turn 2)
+
+User types: *"Started yesterday. Only when AC is on, fan-only is silent."*
+
+```
+POST /enrich/stream
+messages: [user_1, assistant_1, { role: "user", content: "Started yesterday..." }]
+```
+
+AI streams: *"That points to the AC compressor or its clutch. Can you take a photo of the compressor on the driver's side of the engine bay?"*
+`confidence: 45`
+
+---
+
+### Step 4 — User takes photo, app calls /vision
+
+App shows camera UI. User photographs the compressor.
+
+```
+→ Upload photo to CDN → "https://cdn.arwrench.com/photos/abc123.jpg"
+
+POST /vision
+{
+  "imageUrl": "https://cdn.arwrench.com/photos/abc123.jpg",
+  "systemPrompt": null,
+  "assetContext": { "type": "vehicle", "make": "Toyota", "model": "Camry", "year": 2020 }
+}
+```
+
+Response:
+```json
+{
+  "analysis": "The AC compressor clutch is visibly disengaged. Clutch plate shows wear consistent with slipping.",
+  "confidence": 84,
+  "structured_findings": { "part": "AC compressor clutch", "condition": "worn", "severity": "moderate" }
+}
+```
+
+App injects vision result into messages as:
+```json
+{ "role": "assistant", "content": "[Photo] The AC compressor clutch is visibly disengaged. Clutch plate shows wear consistent with slipping." }
+```
+
+---
+
+### Step 5 — AI delivers final diagnosis (Turn 3)
+
+```
+POST /enrich/stream
+messages: [user_1, assistant_1, user_2, assistant_2 (photo result), user_3 (implied continue)]
+```
+
+AI streams the diagnosis:
+*"Your AC compressor clutch has failed — the wear marks and gap confirm it's not engaging. You'll need to replace the clutch assembly or the full compressor. This is a moderate job: drain the refrigerant first, then unbolt the clutch from the compressor shaft..."*
+
+`confidence: 87`
+
+On the `complete` event, `affiliate_links` arrives:
+```json
+[
+  {
+    "type": "affiliate_link",
+    "label": "Buy AC Compressor Clutch",
+    "data": "{\"category\":\"AC Part\",\"name\":\"AC compressor clutch\"}"
+  }
+]
+```
+
+App renders a product card below the diagnosis bubble. App resolves the affiliate link via Convex, shows product name, price, and a "View Product" button.
+
+**Session complete.** Total turns: 3 `/enrich` calls + 1 `/vision` call.
 
 ---
 
@@ -631,7 +813,9 @@ User attaches a file
 
 | Status | Meaning | Action |
 |--------|---------|--------|
+| `401` | Missing or wrong `X-API-Token` header | Check the token Convex is sending |
 | `422` | Validation error — missing or invalid field | Check required fields. The body names the bad field |
+| `429` | IP rate limit hit — see `Retry-After` header | Wait `Retry-After` seconds, then retry |
 | `500` | Server or AI error | Retry once after 2–3 seconds. If it persists, show a generic error |
 
 ---
@@ -695,6 +879,12 @@ for link in event.affiliate_links {
 
 ---
 
+## Bot Orchestrator Integration (Wrenchy)
+
+The future Wrenchy bot calls these same three endpoints using the same request shapes as the mobile app — no separate bot API is needed. The bot passes its own `threadId` and maintains a `messages[]` array exactly as the app does, enabling it to hand off a mid-session conversation to a human user (or pick one up) by sharing the messages array as a JSON snapshot. The integration surface is minimal by design: `/classify` to bootstrap an asset context, `/enrich` for every conversational turn, and `/vision` when the bot triggers a camera capture. Bot architects should treat the messages array as the shared session state — whoever holds it, drives the session.
+
+---
+
 ## skillLevel Reference
 
 | Value | Who | AI behaviour |
@@ -706,3 +896,15 @@ for link in event.affiliate_links {
 | 9–10 | Professional technician | OEM procedures, TSBs, fault tree analysis |
 
 ---
+
+## Future Changes
+
+This document describes v1.0 of the ARWrench API contract. Planned additions (not yet available):
+
+- **Multi-thread support** — simultaneous open diagnostic sessions for multiple assets per user
+- **Wrenchy bot integration hooks** — dedicated handoff events and shared snapshot endpoints for the orchestration layer
+- **Reminder intelligence RAG layer** — proactive reminders informed by service history embeddings
+- **Rate limit headers** — `X-RateLimit-Remaining` and `X-RateLimit-Reset` in every response
+- **Persistent session storage** — optional server-side messages[] caching so the app doesn't need to resend full history
+
+Breaking changes will be versioned. The current v1.0 surface will remain stable through MVP launch.
