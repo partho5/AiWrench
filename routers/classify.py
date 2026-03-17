@@ -12,7 +12,8 @@ from fastapi import APIRouter, HTTPException
 from logger_config import logger, LogContext
 from log_utils import log_step, log_result
 from models import ClassifyRequest, ClassifyResponse, RefineRequest, RefineResponse
-from services.grok_client import call_grok, parse_json_response
+from services.grok_client import parse_json_response
+from services.model_router import call_llm, get_model_config, route_classify
 from services.rag_service import retrieve_relevant_chunks
 
 router = APIRouter()
@@ -115,9 +116,12 @@ async def classify(req: ClassifyRequest):
             f"User description: {text_desc if text_desc else '(No text description provided)'}"
         )
 
-        raw = await call_grok(
+        model_cfg = get_model_config(route_classify())
+        raw = await call_llm(
+            model_cfg,
             system_prompt,
             [{"role": "user", "content": user_message}],
+            temperature=0.7,
         )
         parsed = parse_json_response(raw)
 
@@ -193,7 +197,9 @@ async def classify_refine(req: RefineRequest):
         user_message = f"Follow-up answers from user:\n{qa_lines}"
 
         # First pass
-        raw = await call_grok(
+        model_cfg = get_model_config(route_classify())
+        raw = await call_llm(
+            model_cfg,
             system_prompt,
             [{"role": "user", "content": user_message}],
             temperature=grok_temp,
@@ -214,7 +220,8 @@ async def classify_refine(req: RefineRequest):
                 + "\n\n"
                 + _SELF_CRITIQUE_ADDENDUM.format(score=confidence)
             )
-            raw2 = await call_grok(
+            raw2 = await call_llm(
+                model_cfg,
                 critique_prompt,
                 [{"role": "user", "content": user_message}],
                 temperature=grok_temp,

@@ -26,13 +26,23 @@ async def call_grok(
     messages: list[dict],
     temperature: float = 0.7,
     max_tokens: int = 2048,
+    *,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
-    """Call Grok and return the raw text response content."""
+    """Call Grok and return the raw text response content.
+
+    Args:
+        model: override the default GROK_MODEL env var for this call.
+        reasoning_effort: "none" | "low" | "high" — controls thinking depth on
+            grok-3-mini models. Omit to use the model default.
+    """
     api_key = _get_api_key()
     start_time = time.time()
+    _model = model or GROK_MODEL
 
     payload = {
-        "model": GROK_MODEL,
+        "model": _model,
         "messages": [
             {"role": "system", "content": system_prompt},
             *messages,
@@ -40,6 +50,8 @@ async def call_grok(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    if reasoning_effort is not None:
+        payload["reasoning_effort"] = reasoning_effort
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -58,7 +70,7 @@ async def call_grok(
                 log_api_call(
                     service="grok",
                     endpoint=GROK_API_URL,
-                    request_body={"model": GROK_MODEL, "messages_count": len(messages)},
+                    request_body={"model": _model, "messages_count": len(messages)},
                     response_status=response.status_code,
                     duration_ms=duration_ms,
                     error=response.text[:200],
@@ -69,7 +81,7 @@ async def call_grok(
             log_api_call(
                 service="grok",
                 endpoint=GROK_API_URL,
-                request_body={"model": GROK_MODEL, "messages_count": len(messages)},
+                request_body={"model": _model, "messages_count": len(messages)},
                 response_status=response.status_code,
                 response_body={"token_usage": len(data.get("choices", [{}])[0].get("message", {}).get("content", ""))},
                 duration_ms=duration_ms,
@@ -140,16 +152,23 @@ async def call_grok_stream(
     messages: list[dict],
     temperature: float = 0.7,
     max_tokens: int = 2048,
+    *,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
 ):
-    """Stream Grok response as server-sent events.
+    """Stream Grok response as text chunks.
 
-    Yields chunks of text as they arrive from Grok.
+    Args:
+        model: override the default GROK_MODEL env var for this call.
+        reasoning_effort: "none" | "low" | "high" — controls thinking depth on
+            grok-3-mini models. Omit to use the model default.
     """
     api_key = _get_api_key()
     start_time = time.time()
+    _model = model or GROK_MODEL
 
     payload = {
-        "model": GROK_MODEL,
+        "model": _model,
         "messages": [
             {"role": "system", "content": system_prompt},
             *messages,
@@ -158,6 +177,8 @@ async def call_grok_stream(
         "max_tokens": max_tokens,
         "stream": True,
     }
+    if reasoning_effort is not None:
+        payload["reasoning_effort"] = reasoning_effort
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -199,7 +220,7 @@ async def call_grok_stream(
                 log_api_call(
                     service="grok_stream",
                     endpoint=GROK_API_URL,
-                    request_body={"model": GROK_MODEL, "messages_count": len(messages)},
+                    request_body={"model": _model, "messages_count": len(messages)},
                     response_body={"token_usage": len(full_content)},
                     duration_ms=duration_ms,
                 )

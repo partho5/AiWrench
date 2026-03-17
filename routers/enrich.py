@@ -15,8 +15,9 @@ from fastapi.responses import StreamingResponse
 from logger_config import logger, LogContext
 from log_utils import log_step, log_result
 from models import EnrichRequest, EnrichResponse
-from services.grok_client import call_grok, call_grok_stream, parse_json_response
+from services.grok_client import parse_json_response
 from services.grok_vision_client import analyze_image
+from services.model_router import call_llm, call_llm_stream, get_model_config, route_enrich
 
 router = APIRouter()
 
@@ -428,7 +429,8 @@ async def enrich(req: EnrichRequest):
         system_prompt = build_enriched_prompt(req, older_summary)
         grok_temp = GROK_LLM_TEMPERATURE.get(req.skillLevel, 0.55)
 
-        raw = await call_grok(system_prompt, recent_messages, temperature=grok_temp)
+        model_cfg = get_model_config(route_enrich(req))
+        raw = await call_llm(model_cfg, system_prompt, recent_messages, grok_temp)
         log_step("grok_response_received", raw_length=len(raw))
 
         parsed = parse_json_response(raw)
@@ -504,12 +506,13 @@ async def enrich_stream(req: EnrichRequest):
 
             system_prompt = build_stream_prompt(req, older_summary, vision_analysis=vision_analysis)
             grok_temp = GROK_LLM_TEMPERATURE.get(req.skillLevel, 0.55)
+            model_cfg = get_model_config(route_enrich(req))
 
             full_response = ""
             streamed_pos = 0   # bytes already emitted to the client
             meta_start = -1    # index in full_response where metadata begins (after separator)
 
-            async for chunk in call_grok_stream(system_prompt, recent_messages, temperature=grok_temp):
+            async for chunk in call_llm_stream(model_cfg, system_prompt, recent_messages, grok_temp):
                 full_response += chunk
 
                 if meta_start == -1:

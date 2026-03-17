@@ -36,7 +36,10 @@ from routers.enrich import (  # noqa: E402
 )
 from services.grok_client import parse_json_response  # noqa: E402
 
-client = TestClient(app)
+# Include auth token so validation tests reach FastAPI before the auth middleware
+# rejects them. If token is not set in .env the middleware skips auth anyway.
+_API_TOKEN = os.getenv("API_SECRET_TOKEN", "")
+client = TestClient(app, headers={"X-API-Token": _API_TOKEN} if _API_TOKEN else {})
 
 
 # ---------------------------------------------------------------------------
