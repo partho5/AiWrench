@@ -4,7 +4,7 @@ Tier map
 --------
   first_message  fastest available model — OpenAI gpt-4o-mini if key present, else Grok no-reasoning
   standard       grok-3-mini-fast, reasoning_effort: low
-  deep           grok-3-mini-fast, reasoning_effort: high  (swap to claude when claude_client.py added)
+  deep           claude-opus-4-6  (Grok Vision extracts image/PDF → Claude reasons)
   turbo          grok-3-mini-fast, reasoning_effort: none  — classify only (JSON extraction)
 
 Routing signals for /enrich (checked in priority order)
@@ -79,12 +79,11 @@ def _build_models() -> dict[str, dict]:
             "max_tokens":       1024,
         },
         "deep": {
-            # To use Claude: set provider="claude", model="claude-opus-4-6"
-            # and add services/claude_client.py + dispatch branches below
-            "provider":         "grok",
-            "model":            "grok-3-mini-fast",
-            "reasoning_effort": "high",
-            "max_tokens":       2048,
+            # Grok Vision handles image/PDF extraction upstream (enrich.py).
+            # Claude receives the extracted text and owns all diagnosis reasoning.
+            "provider":  "claude",
+            "model":     "claude-opus-4-6",
+            "max_tokens": 2048,
         },
         "turbo": {
             "provider":         "grok",
@@ -186,10 +185,12 @@ async def call_llm(
             max_tokens=_max,
         )
 
-    # provider == "claude":
-    #   from services.claude_client import call_claude
-    #   return await call_claude(system_prompt, messages, temperature,
-    #                            model=config["model"], max_tokens=_max)
+    if provider == "claude":
+        from services.claude_client import call_claude
+        return await call_claude(
+            system_prompt, messages, temperature,
+            model=config["model"], max_tokens=_max,
+        )
 
     raise ValueError(f"model_router: unknown provider {provider!r}")
 
@@ -234,11 +235,13 @@ async def call_llm_stream(
             yield chunk
         return
 
-    # provider == "claude":
-    #   from services.claude_client import call_claude_stream
-    #   async for chunk in call_claude_stream(system_prompt, messages, temperature,
-    #                                         model=config["model"], max_tokens=_max):
-    #       yield chunk
-    #   return
+    if provider == "claude":
+        from services.claude_client import call_claude_stream
+        async for chunk in call_claude_stream(
+            system_prompt, messages, temperature,
+            model=config["model"], max_tokens=_max,
+        ):
+            yield chunk
+        return
 
     raise ValueError(f"model_router: unknown provider {provider!r}")
