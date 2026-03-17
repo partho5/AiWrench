@@ -44,6 +44,8 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your API keys
 
+# activate
+source venv/bin/activate
 # Start development server
 uvicorn main:app --reload
 ```

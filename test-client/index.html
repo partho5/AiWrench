@@ -57,10 +57,11 @@
 
     <script>
         // Cloudinary config — public values for unsigned upload
-        const CLOUDINARY_CLOUD_NAME = "dfgox7xc8";
-        const CLOUDINARY_UPLOAD_PRESET = "hq-glass-orders-unsigned";
+        const CLOUDINARY_CLOUD_NAME = "dnsyyo4cc";
+        const CLOUDINARY_UPLOAD_PRESET = "test-wrench";
         let API_BASE = "http://localhost:8000";
         API_BASE = "https://aiwrench-production.up.railway.app";
+        const API_TOKEN = "3f9b7c2a6d1e4a9fb8c5d0e7f3a2c6b9d4e1f8a7c5b2d9e0f6a3b1c8d7e4f2a";
 
         let messages = [];
         let currentFile = null;
@@ -185,7 +186,7 @@
         async function classifyInitial(text, imageUrl) {
             const res = await fetch(`${API_BASE}/classify`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-API-Token': API_TOKEN },
                 body: JSON.stringify({
                     textDescription: text,
                     assetId: "test_asset_123"
@@ -235,7 +236,7 @@
             try {
                 const res = await fetch(`${API_BASE}/enrich/stream`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-API-Token': API_TOKEN },
                     body: JSON.stringify(payload)
                 });
 
