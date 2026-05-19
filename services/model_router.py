@@ -5,7 +5,7 @@ Tier map
   first_message  fastest available model — OpenAI gpt-4o-mini if key present, else Grok no-reasoning
   standard       grok-3-mini-fast, reasoning_effort: low
   deep           claude-opus-4-6  (Grok Vision extracts image/PDF → Claude reasons)
-  turbo          grok-3-mini-fast, reasoning_effort: none  — classify only (JSON extraction)
+  turbo          grok-3-mini-fast, no reasoning_effort     — classify only (JSON extraction)
 
 Routing signals for /enrich (checked in priority order)
 ---------------------------------------------------------
@@ -62,12 +62,11 @@ def _build_models() -> dict[str, dict]:
             "max_tokens": 512,
         }
     else:
-        # Grok with no reasoning is the fallback — still fast
+        # Grok without reasoning_effort = fastest, no internal thinking
         first_message_cfg = {
-            "provider":         "grok",
-            "model":            "grok-3-mini-fast",
-            "reasoning_effort": "none",
-            "max_tokens":       512,
+            "provider":   "grok",
+            "model":      "grok-3-mini-fast",
+            "max_tokens": 512,
         }
 
     return {
@@ -86,10 +85,9 @@ def _build_models() -> dict[str, dict]:
             "max_tokens": 2048,
         },
         "turbo": {
-            "provider":         "grok",
-            "model":            "grok-3-mini-fast",
-            "reasoning_effort": "none",
-            "max_tokens":       1024,   # classify responses include recs + reminders, 512 can truncate
+            "provider":   "grok",
+            "model":      "grok-3-mini-fast",
+            "max_tokens": 1024,   # classify responses include recs + reminders, 512 can truncate
         },
     }
 

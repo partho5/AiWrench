@@ -239,6 +239,85 @@ Tests use mocked Grok responses — no real API keys needed for the test suite. 
 
 ---
 
+## Load / Stress Testing
+
+**File:** [tests/load_test.py](tests/load_test.py)
+
+Fires concurrent requests against a live API instance and reports latency percentiles, throughput, and error rates. Uses only stdlib + `httpx` (already in requirements.txt) — no extra dependencies.
+
+### Run against local server
+
+```bash
+# Start the server first
+python -m uvicorn main:app --reload --port 8000
+
+# Run load test (default: 10 concurrent workers, 50 requests per scenario)
+python tests/load_test.py
+```
+
+### Run against Railway (or any live URL)
+
+```bash
+BASE_URL=https://your-app.up.railway.app \
+API_SECRET_TOKEN=your-token \
+python tests/load_test.py
+```
+
+### Options
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BASE_URL` | `http://localhost:8000` | Target API base URL |
+| `API_SECRET_TOKEN` | _(empty)_ | Value for `X-API-Token` header |
+| `CONCURRENCY` | `10` | Simultaneous workers |
+| `ITERATIONS` | `50` | Total requests per scenario |
+| `TIMEOUT` | `30` | Per-request timeout in seconds |
+
+### What it tests
+
+| Scenario | What it validates |
+|----------|------------------|
+| `GET /health` | Server is up, middleware overhead is negligible |
+| `POST /classify` | Grok JSON extraction latency under concurrent load |
+| `POST /enrich` | Core conversation engine latency + concurrency |
+| `POST /classify/refine` | Dual-pass path latency |
+| Rate-limit burst | 30 simultaneous requests → confirms 429s fire correctly |
+
+### Sample output
+
+```
+=======================================================
+  ARWrench API — Load Test
+  Target     : http://localhost:8000
+  Concurrency: 10 workers
+  Iterations : 50 per scenario
+=======================================================
+
+───────────────────────────────────────────────────────
+  Scenario : GET /health
+  Requests : 50  |  OK: 50  |  Errors: 0  |  429s: 0
+  Latency  : min=3ms  median=5ms  p95=11ms  max=18ms
+───────────────────────────────────────────────────────
+
+───────────────────────────────────────────────────────
+  Scenario : POST /enrich
+  Requests : 50  |  OK: 48  |  Errors: 0  |  429s: 2
+  Latency  : min=2100ms  median=3800ms  p95=9200ms  max=11400ms
+───────────────────────────────────────────────────────
+
+  Result: ✓ PASS — no unexpected errors
+```
+
+### Interpreting results
+
+- **`/health` p95 > 100ms** — middleware overhead, investigate logging or auth code
+- **`/enrich` p95 > 12s** — Grok/Claude API is slow under this load; consider reducing `CONCURRENCY`
+- **Errors > 0** — server crash or misconfiguration; check logs
+- **429s on /enrich** — expected if RATE_LIMIT_RPM is set low; raise it or lower CONCURRENCY
+- **429s on rate-limit burst** — correct behaviour; rate limiting is working
+
+---
+
 ## Security Rules
 
 - All API keys from environment — never hardcode, never log, never expose in responses
